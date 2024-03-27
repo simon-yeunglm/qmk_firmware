@@ -4,7 +4,9 @@
 #include "quantum/rgb_matrix/rgb_matrix.h"
 #include "quantum/led.h"
 #include "quantum/action_util.h"
+#include "quantum/action_layer.h"
 #include "tmk_core/protocol/host.h"
+#include "keymap_layer.h"
 
 #include <math.h>
 
@@ -23,9 +25,32 @@
 #define BACKSPACE_KEY_IDX           (31)
 #define NUM_LOCK_KEY_IDX            (32)
 #define CAPS_LOCK_KEY_IDX           (54)
+// num pad layer key
+#define KEY_7_KEY_IDX               (25)
+#define KEY_8_KEY_IDX               (26)
+#define KEY_9_KEY_IDX               (27)
+#define KEY_0_KEY_IDX               (28)
+
+#define KEY_U_KEY_IDX               (43)
+#define KEY_I_KEY_IDX               (44)
+#define KEY_O_KEY_IDX               (45)
+#define KEY_P_KEY_IDX               (46)
+
+#define KEY_J_KEY_IDX               (61)
+#define KEY_K_KEY_IDX               (62)
+#define KEY_L_KEY_IDX               (63)
+#define KEY_COLON_KEY_IDX           (64)
+
+#define KEY_COMA_KEY_IDX              (78)
+#define KEY_DOT_KEY_IDX               (79)
+#define KEY_SLASH_KEY_IDX             (80)
+
 #define NUM_LOCK_LED_KEY_IDX        NO_LED
 #define CAPS_LOCK_LED_KEY_IDX       NO_LED
 #define SCROLL_LOCK_LED_KEY_IDX     NO_LED
+
+#define NUMPAD_FADE_IN_DELAY_TIME   (0.25f)
+#define NUMPAD_FADE_IN_SPEED        (4.0f)
 
 typedef struct float3_s
 {
@@ -153,6 +178,7 @@ uint8_t     idle_state= IdleState_WakingUpFromIdle;
 float       idle_state_timer= 0.0f;
 float       idle_timer      = 0.0f;
 
+float       numpad_layer_timer= 0.0f;
 
 static void tick_led(void);
 static void render_led(int i);
@@ -304,6 +330,19 @@ static void tick_led()
         render_pass_weight_ctrl = clamp(render_pass_weight_ctrl + (isHeldCtrl   ? blendDelta : -blendDelta) , 0.0f, 1.0f);
         render_pass_weight_shift= clamp(render_pass_weight_shift+ (isHeldShift  ? blendDelta : -blendDelta) , 0.0f, 1.0f);
         render_pass_weight_alt  = clamp(render_pass_weight_alt  + (isHeldAlt    ? blendDelta : -blendDelta) , 0.0f, 1.0f);
+    }
+
+    // update numpad weight
+    if (layer_state_is(L_FnCap))
+    {
+        const float maxT= (1.0f/NUMPAD_FADE_IN_SPEED) + NUMPAD_FADE_IN_DELAY_TIME;
+        numpad_layer_timer+= deltaT;
+        numpad_layer_timer = fminf(numpad_layer_timer, maxT);
+    }
+    else
+    {
+        numpad_layer_timer-= deltaT;
+        numpad_layer_timer = fmaxf(numpad_layer_timer, 0.0f);
     }
 
     // update key press
@@ -572,6 +611,44 @@ static void render_led(int i)
         }
     }
 
+    // numpad layer
+    uint8_t keyID= i;
+    if (isContinueRenderPass)
+    {
+        if (numpad_layer_timer > NUMPAD_FADE_IN_DELAY_TIME)
+        {
+            bool isNumPadKey=   (keyID >= KEY_7_KEY_IDX && keyID <= KEY_9_KEY_IDX) ||
+                                (keyID >= KEY_U_KEY_IDX && keyID <= KEY_O_KEY_IDX) ||
+                                (keyID >= KEY_J_KEY_IDX && keyID <= KEY_L_KEY_IDX) ||
+                                (keyID == KEY_COMA_KEY_IDX);
+            bool isNumPadSign=  keyID == KEY_0_KEY_IDX ||
+                                keyID == KEY_P_KEY_IDX ||
+                                keyID == KEY_COLON_KEY_IDX ||
+                                keyID == KEY_DOT_KEY_IDX ||
+                                keyID == KEY_SLASH_KEY_IDX ;
+
+            float alpha= fminf((numpad_layer_timer - NUMPAD_FADE_IN_DELAY_TIME) * NUMPAD_FADE_IN_SPEED, 1.0f);
+            float3 col;
+            if (isNumPadKey || isNumPadSign)
+            {
+                // show numpad key
+                float3 colKey = { 0.25f, 0.25f, 1.0f };
+                float3 colSign= { 1.0f, 0.25f, 0.25f };
+                col= isNumPadKey ? colKey : colSign;
+            }
+            else
+            {
+                // dim background color
+                alpha*= 0.75f;
+                col.x= 0;
+                col.y= 0;
+                col.z= 0;
+            }
+            rgb   = add_f3(rgb, mul_f3_s(col, alpha * accum_inv_alpha));
+            accum_inv_alpha *= 1.0f - alpha;
+        }
+    }
+
     // color scroll
     if (isContinueRenderPass)
     {
@@ -626,7 +703,6 @@ static void render_led(int i)
 
     // blink lock keys
     led_t   led_state = host_keyboard_led_state();
-    uint8_t keyID= i;
     bool isOffNumLock   = !led_state.num_lock;
     bool isOffCapLock   = !led_state.caps_lock;
     bool isOffScrollLock= !led_state.scroll_lock;
